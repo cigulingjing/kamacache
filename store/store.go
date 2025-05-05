@@ -24,6 +24,7 @@ type CacheType string
 const (
 	LRU  CacheType = "lru"
 	LRU2 CacheType = "lru2"
+	LFU  CacheType = "lfu"
 )
 
 // Options 通用缓存配置选项
@@ -54,6 +55,8 @@ func NewStore(cacheType CacheType, opts Options) Store {
 		return newLRU2Cache(opts)
 	case LRU:
 		return newLRUCache(opts)
+	case LFU:
+		return newLFUCache(opts)
 	default:
 		return newLRUCache(opts)
 	}

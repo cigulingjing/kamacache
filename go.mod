@@ -1,9 +1,8 @@
 module github.com/youngyangyang04/KamaCache-Go
 
-
 go 1.22
 
-toolchain go1.22.11
+toolchain go1.22.5
 
 require (
 	github.com/sirupsen/logrus v1.9.3
