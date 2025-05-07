@@ -1,4 +1,4 @@
-package kamacache
+package service
 
 import (
 	"context"
@@ -8,8 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	. "github.com/cigulingjing/kamacache/cache"
+	"github.com/cigulingjing/kamacache/singleflight"
 	"github.com/sirupsen/logrus"
-	"github.com/youngyangyang04/KamaCache-Go/singleflight"
 )
 
 var (
@@ -39,13 +40,28 @@ func (f GetterFunc) Get(ctx context.Context, key string) ([]byte, error) {
 	return f(ctx, key)
 }
 
+// * rpc.ClientPicker implements this interface
+type PeerPicker interface {
+	PickPeer(key string) (peer Peer, ok bool, self bool)
+	Close() error
+}
+
+// Peer define the interface for cache node
+// * rpc.client implement Peer
+type Peer interface {
+	Get(group string, key string) ([]byte, error)
+	Set(ctx context.Context, group string, key string, value []byte) error
+	Delete(group string, key string) (bool, error)
+	Close() error
+}
+
 // Group 是一个缓存命名空间
 type Group struct {
 	name       string
 	getter     Getter
 	mainCache  *Cache
 	peers      PeerPicker
-	loader     *singleflight.Group
+	loader     *singleflight.FlightGroup
 	expiration time.Duration // 缓存过期时间，0表示永不过期
 	closed     int32         // 原子变量，标记组是否已关闭
 	stats      groupStats    // 统计信息
@@ -101,7 +117,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter, opts ...GroupOption)
 		name:      name,
 		getter:    getter,
 		mainCache: NewCache(cacheOpts),
-		loader:    &singleflight.Group{},
+		loader:    &singleflight.FlightGroup{},
 	}
 
 	// 应用选项
@@ -168,11 +184,12 @@ func (g *Group) Set(ctx context.Context, key string, value []byte) error {
 		return ErrValueRequired
 	}
 
-	// 检查是否是从其他节点同步过来的请求
+	// This command extracts the value from_peer from the context
+	// If true, means that the request was sent from another node.
 	isPeerRequest := ctx.Value("from_peer") != nil
 
 	// 创建缓存视图
-	view := ByteView{b: cloneBytes(value)}
+	view := ByteView{B: CloneBytes(value)}
 
 	// 设置到本地缓存
 	if g.expiration > 0 {
@@ -226,7 +243,7 @@ func (g *Group) syncToPeers(ctx context.Context, op string, key string, value []
 		return
 	}
 
-	// 创建同步请求上下文
+	// Use Context carry from_peer flag
 	syncCtx := context.WithValue(context.Background(), "from_peer", true)
 
 	var err error
@@ -328,7 +345,7 @@ func (g *Group) loadData(ctx context.Context, key string) (value ByteView, err e
 	}
 
 	atomic.AddInt64(&g.stats.loaderHits, 1)
-	return ByteView{b: cloneBytes(bytes)}, nil
+	return ByteView{B: CloneBytes(bytes)}, nil
 }
 
 // getFromPeer 从其他节点获取数据
@@ -337,7 +354,7 @@ func (g *Group) getFromPeer(ctx context.Context, peer Peer, key string) (ByteVie
 	if err != nil {
 		return ByteView{}, fmt.Errorf("failed to get from peer: %w", err)
 	}
-	return ByteView{b: bytes}, nil
+	return ByteView{B: bytes}, nil
 }
 
 // RegisterPeers 注册PeerPicker

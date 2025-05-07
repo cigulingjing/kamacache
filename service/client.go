@@ -1,4 +1,4 @@
-package kamacache
+package service
 
 import (
 	"context"
@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	pb "github.com/youngyangyang04/KamaCache-Go/pb"
+	pb "github.com/cigulingjing/kamacache/service/pb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// Client use to call RPC methods
 type Client struct {
 	addr    string
 	svcName string
@@ -20,7 +21,7 @@ type Client struct {
 	grpcCli pb.KamaCacheClient
 }
 
-var _ Peer = (*Client)(nil)
+// var _ Peer = (*Client)(nil)
 
 func NewClient(addr string, svcName string, etcdCli *clientv3.Client) (*Client, error) {
 	var err error

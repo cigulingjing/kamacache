@@ -1,4 +1,4 @@
-package main
+package kamacache
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	lcache "github.com/youngyangyang04/KamaCache-Go"
+	"github.com/cigulingjing/kamacache/service"
 )
 
 func main() {
@@ -20,22 +20,22 @@ func main() {
 	log.Printf("[节点%s] 启动，地址: %s", *nodeID, addr)
 
 	// 创建节点
-	node, err := lcache.NewServer(addr, "kama-cache",
-		lcache.WithEtcdEndpoints([]string{"localhost:2379"}),
-		lcache.WithDialTimeout(5*time.Second),
+	node, err := service.NewServer(addr, "kama-cache",
+		service.WithEtcdEndpoints([]string{"localhost:2379"}),
+		service.WithDialTimeout(5*time.Second),
 	)
 	if err != nil {
 		log.Fatal("创建节点失败:", err)
 	}
 
 	// 创建节点选择器
-	picker, err := lcache.NewClientPicker(addr)
+	picker, err := service.NewClientPicker(addr)
 	if err != nil {
 		log.Fatal("创建节点选择器失败:", err)
 	}
 
 	// 创建缓存组
-	group := lcache.NewGroup("test", 2<<20, lcache.GetterFunc(
+	group := service.NewGroup("test", 2<<20, service.GetterFunc(
 		func(ctx context.Context, key string) ([]byte, error) {
 			log.Printf("[节点%s] 触发数据源加载: key=%s", *nodeID, key)
 			return []byte(fmt.Sprintf("节点%s的数据源值", *nodeID)), nil

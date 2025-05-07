@@ -1,14 +1,17 @@
-package kamacache
+package cache
 
 import (
 	"context"
-	"github.com/youngyangyang04/KamaCache-Go/store"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/cigulingjing/kamacache/store"
 )
+
+
 
 // Cache 是对底层缓存存储的封装
 type Cache struct {

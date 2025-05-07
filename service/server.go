@@ -1,34 +1,35 @@
-package kamacache
+package service
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
-	"crypto/tls"
-
 	"github.com/sirupsen/logrus"
-	pb "github.com/youngyangyang04/KamaCache-Go/pb"
-	"github.com/youngyangyang04/KamaCache-Go/registry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	"github.com/cigulingjing/kamacache/registry"
+
+	pb "github.com/cigulingjing/kamacache/service/pb"
 )
 
-// Server 定义缓存服务器
+// Cache server
 type Server struct {
 	pb.UnimplementedKamaCacheServer
-	addr       string           // 服务地址
-	svcName    string           // 服务名称
-	groups     *sync.Map        // 缓存组
-	grpcServer *grpc.Server     // gRPC服务器
-	etcdCli    *clientv3.Client // etcd客户端
-	stopCh     chan error       // 停止信号
-	opts       *ServerOptions   // 服务器选项
+	addr       string
+	svcName    string           // service name
+	groups     *sync.Map        // Cache groups
+	grpcServer *grpc.Server     // gRPC server
+	etcdCli    *clientv3.Client // etcd client
+	stopCh     chan error       // stop channel
+	opts       *ServerOptions
 }
 
 // ServerOptions 服务器配置选项
@@ -41,31 +42,31 @@ type ServerOptions struct {
 	KeyFile       string        // 密钥文件
 }
 
-// DefaultServerOptions 默认配置
+// DefaultServerOptions
 var DefaultServerOptions = &ServerOptions{
 	EtcdEndpoints: []string{"localhost:2379"},
 	DialTimeout:   5 * time.Second,
 	MaxMsgSize:    4 << 20, // 4MB
 }
 
-// ServerOption 定义选项函数类型
+// ServerOption defines option function types
 type ServerOption func(*ServerOptions)
 
-// WithEtcdEndpoints 设置etcd端点
+// WithEtcdEndpoints set etcd endpoints
 func WithEtcdEndpoints(endpoints []string) ServerOption {
 	return func(o *ServerOptions) {
 		o.EtcdEndpoints = endpoints
 	}
 }
 
-// WithDialTimeout 设置连接超时
+// WithDialTimeout set timeout
 func WithDialTimeout(timeout time.Duration) ServerOption {
 	return func(o *ServerOptions) {
 		o.DialTimeout = timeout
 	}
 }
 
-// WithTLS 设置TLS配置
+// WithTLS set TLS
 func WithTLS(certFile, keyFile string) ServerOption {
 	return func(o *ServerOptions) {
 		o.TLS = true
@@ -74,14 +75,14 @@ func WithTLS(certFile, keyFile string) ServerOption {
 	}
 }
 
-// NewServer 创建新的服务器实例
 func NewServer(addr, svcName string, opts ...ServerOption) (*Server, error) {
 	options := DefaultServerOptions
+	// Merge config in opts to options
 	for _, opt := range opts {
 		opt(options)
 	}
 
-	// 创建etcd客户端
+	// create etcd client
 	etcdCli, err := clientv3.New(clientv3.Config{
 		Endpoints:   options.EtcdEndpoints,
 		DialTimeout: options.DialTimeout,
@@ -90,7 +91,7 @@ func NewServer(addr, svcName string, opts ...ServerOption) (*Server, error) {
 		return nil, fmt.Errorf("failed to create etcd client: %v", err)
 	}
 
-	// 创建gRPC服务器
+	// create gRPC server
 	var serverOpts []grpc.ServerOption
 	serverOpts = append(serverOpts, grpc.MaxRecvMsgSize(options.MaxMsgSize))
 
@@ -112,10 +113,10 @@ func NewServer(addr, svcName string, opts ...ServerOption) (*Server, error) {
 		opts:       options,
 	}
 
-	// 注册服务
+	// Register gRPC service.
 	pb.RegisterKamaCacheServer(srv.grpcServer, srv)
 
-	// 注册健康检查服务
+	// Register health check service.
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(srv.grpcServer, healthServer)
 	healthServer.SetServingStatus(svcName, healthpb.HealthCheckResponse_SERVING)
@@ -123,18 +124,17 @@ func NewServer(addr, svcName string, opts ...ServerOption) (*Server, error) {
 	return srv, nil
 }
 
-// Start 启动服务器
 func (s *Server) Start() error {
-	// 启动gRPC服务器
+	// start listening
 	lis, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %v", err)
 	}
 
-	// 注册到etcd
+	// Register service with etcd
 	stopCh := make(chan error)
 	go func() {
-		if err := registry.Register(s.svcName, s.addr, stopCh); err != nil {
+		if err := registry.RegisterToEtcd(s.svcName, s.addr, stopCh); err != nil {
 			logrus.Errorf("failed to register service: %v", err)
 			close(stopCh)
 			return
@@ -145,7 +145,6 @@ func (s *Server) Start() error {
 	return s.grpcServer.Serve(lis)
 }
 
-// Stop 停止服务器
 func (s *Server) Stop() {
 	close(s.stopCh)
 	s.grpcServer.GracefulStop()
@@ -154,7 +153,7 @@ func (s *Server) Stop() {
 	}
 }
 
-// Get 实现Cache服务的Get方法
+// * Server implementation of pb.KamaCacheServer interface
 func (s *Server) Get(ctx context.Context, req *pb.Request) (*pb.ResponseForGet, error) {
 	group := GetGroup(req.Group)
 	if group == nil {
@@ -166,6 +165,7 @@ func (s *Server) Get(ctx context.Context, req *pb.Request) (*pb.ResponseForGet, 
 		return nil, err
 	}
 
+	// Deep copy byte and return
 	return &pb.ResponseForGet{Value: view.ByteSLice()}, nil
 }
 
@@ -199,6 +199,8 @@ func (s *Server) Delete(ctx context.Context, req *pb.Request) (*pb.ResponseForDe
 	err := group.Delete(ctx, req.Key)
 	return &pb.ResponseForDelete{Value: err == nil}, err
 }
+
+// * Server implementation end
 
 // loadTLSCredentials 加载TLS证书
 func loadTLSCredentials(certFile, keyFile string) (credentials.TransportCredentials, error) {

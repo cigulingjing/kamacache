@@ -10,191 +10,190 @@ import (
 	"time"
 )
 
-// Map 一致性哈希实现
+// Map implements a consistent hashing algorithm
 type Map struct {
-	mu sync.RWMutex
-	// 配置信息
-	config *Config
-	// 哈希环
-	keys []int
-	// 哈希环到节点的映射
-	hashMap map[int]string
-	// 节点到虚拟节点数量的映射
-	nodeReplicas map[string]int
-	// 节点负载统计
-	nodeCounts map[string]int64
-	// 总请求数
+	mu            sync.RWMutex
+	config        *Config
+	hashRing      []int
+	hashToNodeMap map[int]string
+	vritualNum    map[string]int   // Store total number of virtual nodes corresponding to record nodes
+	nodeRequest   map[string]int64 // Store total request count for nodes
 	totalRequests int64
 }
 
-// New 创建一致性哈希实例
 func New(opts ...Option) *Map {
 	m := &Map{
-		config:       DefaultConfig,
-		hashMap:      make(map[int]string),
-		nodeReplicas: make(map[string]int),
-		nodeCounts:   make(map[string]int64),
+		config:        DefaultConfig,
+		hashToNodeMap: make(map[int]string),
+		vritualNum:    make(map[string]int),
+		nodeRequest:   make(map[string]int64),
 	}
 
 	for _, opt := range opts {
 		opt(m)
 	}
 
-	m.startBalancer() // 启动负载均衡器
+	m.startBalancer() // Start load balancer
 	return m
 }
 
-// Option 配置选项
 type Option func(*Map)
 
-// WithConfig 设置配置
 func WithConfig(config *Config) Option {
 	return func(m *Map) {
 		m.config = config
 	}
 }
 
-// Add 添加节点
-func (m *Map) Add(nodes ...string) error {
+// AddNode nodes to the hash ring
+func (m *Map) AddNode(nodes ...string) error {
 	if len(nodes) == 0 {
 		return errors.New("no nodes provided")
 	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	for _, node := range nodes {
 		if node == "" {
 			continue
 		}
-
-		// 为节点添加虚拟节点
-		m.addNode(node, m.config.DefaultReplicas)
+		m.mu.Lock()
+		m.addVritualNode(node, m.config.DefaultReplicas)
+		m.mu.Unlock()
 	}
 
-	// 重新排序
-	sort.Ints(m.keys)
 	return nil
 }
 
-// Remove 移除节点
-func (m *Map) Remove(node string) error {
+// RemoveNode node from the hash ring
+func (m *Map) RemoveNode(node string) error {
 	if node == "" {
 		return errors.New("invalid node")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	replicas := m.nodeReplicas[node]
+	// Check if the node exists
+	m.mu.RLock()
+	replicas := m.vritualNum[node]
+	m.mu.RUnlock()
 	if replicas == 0 {
 		return fmt.Errorf("node %s not found", node)
 	}
 
-	// 移除节点的所有虚拟节点
+	// Remove virtual nodes
+	m.mu.Lock()
+	m.removeWithVirtualNode(node, replicas)
+	m.mu.Unlock()
+	return nil
+}
+
+// Remove node and its virtual nodes
+// ! Call this method must hold write lock
+func (m *Map) removeWithVirtualNode(node string, replicas int) {
 	for i := 0; i < replicas; i++ {
 		hash := int(m.config.HashFunc([]byte(fmt.Sprintf("%s-%d", node, i))))
-		delete(m.hashMap, hash)
-		for j := 0; j < len(m.keys); j++ {
-			if m.keys[j] == hash {
-				m.keys = append(m.keys[:j], m.keys[j+1:]...)
+		delete(m.hashToNodeMap, hash)
+		for j := 0; j < len(m.hashRing); j++ {
+			if m.hashRing[j] == hash {
+				m.hashRing = append(m.hashRing[:j], m.hashRing[j+1:]...)
 				break
 			}
 		}
 	}
-
-	delete(m.nodeReplicas, node)
-	delete(m.nodeCounts, node)
-	return nil
+	delete(m.vritualNum, node)
+	delete(m.nodeRequest, node)
 }
 
-// Get 获取节点
-func (m *Map) Get(key string) string {
+// GetNode get the node which store the key
+func (m *Map) GetNode(key string) string {
 	if key == "" {
 		return ""
 	}
-
+	// Get read lock
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 
-	if len(m.keys) == 0 {
+	if len(m.hashRing) == 0 {
 		return ""
 	}
-
 	hash := int(m.config.HashFunc([]byte(key)))
-	// 二分查找
-	idx := sort.Search(len(m.keys), func(i int) bool {
-		return m.keys[i] >= hash
+	// Binary search
+	idx := sort.Search(len(m.hashRing), func(i int) bool {
+		return m.hashRing[i] >= hash
 	})
-
-	// 处理边界情况
-	if idx == len(m.keys) {
+	if idx == len(m.hashRing) {
 		idx = 0
 	}
 
-	node := m.hashMap[m.keys[idx]]
-	count := m.nodeCounts[node]
-	m.nodeCounts[node] = count + 1
+	node := m.hashToNodeMap[m.hashRing[idx]]
+	// Release read lock
+	m.mu.RUnlock()
+
+	m.mu.Lock()
+	m.nodeRequest[node]++
 	atomic.AddInt64(&m.totalRequests, 1)
+	m.mu.Unlock()
 
 	return node
 }
 
-// addNode 添加节点的虚拟节点
-func (m *Map) addNode(node string, replicas int) {
+// addVritualNode virtual nodes.
+// ! Call this method must hold write lock
+func (m *Map) addVritualNode(node string, replicas int) {
+
 	for i := 0; i < replicas; i++ {
 		hash := int(m.config.HashFunc([]byte(fmt.Sprintf("%s-%d", node, i))))
-		m.keys = append(m.keys, hash)
-		m.hashMap[hash] = node
+		m.hashRing = append(m.hashRing, hash)
+		m.hashToNodeMap[hash] = node
 	}
-	m.nodeReplicas[node] = replicas
+	m.vritualNum[node] = replicas
+
+	// When add new node, sort the hash ring
+	sort.Ints(m.hashRing)
 }
 
-// checkAndRebalance 检查并重新平衡虚拟节点
+// checkAndRebalance check and rebalance load
 func (m *Map) checkAndRebalance() {
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Total number insufficient
 	if atomic.LoadInt64(&m.totalRequests) < 1000 {
-		return // 样本太少，不进行调整
+		return
 	}
 
-	// 计算负载情况
-	avgLoad := float64(m.totalRequests) / float64(len(m.nodeReplicas))
+	// Use max differ measures load
+	avgLoad := float64(m.totalRequests) / float64(len(m.vritualNum))
 	var maxDiff float64
-
-	for _, count := range m.nodeCounts {
+	for _, count := range m.nodeRequest {
 		diff := math.Abs(float64(count) - avgLoad)
 		if diff/avgLoad > maxDiff {
 			maxDiff = diff / avgLoad
 		}
 	}
 
-	// 如果负载不均衡度超过阈值，调整虚拟节点
+	// Differ beyond threshold
 	if maxDiff > m.config.LoadBalanceThreshold {
 		m.rebalanceNodes()
 	}
 }
 
-// rebalanceNodes 重新平衡节点
+// rebalanceNodes
 func (m *Map) rebalanceNodes() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	avgLoad := float64(m.totalRequests) / float64(len(m.nodeReplicas))
-
-	// 调整每个节点的虚拟节点数量
-	for node, count := range m.nodeCounts {
-		currentReplicas := m.nodeReplicas[node]
+	avgLoad := float64(m.totalRequests) / float64(len(m.vritualNum))
+	// Adjusting the number of virtual nodes
+	for node, count := range m.nodeRequest {
+		currentReplicas := m.vritualNum[node]
 		loadRatio := float64(count) / avgLoad
 
 		var newReplicas int
 		if loadRatio > 1 {
-			// 负载过高，减少虚拟节点
+			// Reduce virtual nodes
 			newReplicas = int(float64(currentReplicas) / loadRatio)
 		} else {
-			// 负载过低，增加虚拟节点
+			// Add virtual nodes
 			newReplicas = int(float64(currentReplicas) * (2 - loadRatio))
 		}
 
-		// 确保在限制范围内
+		// Ensure newReplicas is within the limits
 		if newReplicas < m.config.MinReplicas {
 			newReplicas = m.config.MinReplicas
 		}
@@ -203,25 +202,20 @@ func (m *Map) rebalanceNodes() {
 		}
 
 		if newReplicas != currentReplicas {
-			// 重新添加节点的虚拟节点
-			if err := m.Remove(node); err != nil {
-				continue // 如果移除失败，跳过这个节点
-			}
-			m.addNode(node, newReplicas)
+			// Remove node and add virtual nodes
+			m.removeWithVirtualNode(node, m.vritualNum[node])
+			m.addVritualNode(node, newReplicas)
 		}
 	}
 
-	// 重置计数器
-	for node := range m.nodeCounts {
-		m.nodeCounts[node] = 0
+	for node := range m.nodeRequest {
+		m.nodeRequest[node] = 0
 	}
 	atomic.StoreInt64(&m.totalRequests, 0)
 
-	// 重新排序
-	sort.Ints(m.keys)
 }
 
-// GetStats 获取负载统计信息
+// GetStats get each node's request/total request ratio
 func (m *Map) GetStats() map[string]float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -232,13 +226,13 @@ func (m *Map) GetStats() map[string]float64 {
 		return stats
 	}
 
-	for node, count := range m.nodeCounts {
+	for node, count := range m.nodeRequest {
 		stats[node] = float64(count) / float64(total)
 	}
 	return stats
 }
 
-// 将checkAndRebalance移到单独的goroutine中
+// startBalancer starts routine to run @checkAndRebalance
 func (m *Map) startBalancer() {
 	go func() {
 		ticker := time.NewTicker(time.Second)

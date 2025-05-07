@@ -1,4 +1,4 @@
-package kamacache
+package service
 
 import (
 	"context"
@@ -9,26 +9,13 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/youngyangyang04/KamaCache-Go/consistenthash"
-	"github.com/youngyangyang04/KamaCache-Go/registry"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/cigulingjing/kamacache/consistenthash"
+	"github.com/cigulingjing/kamacache/registry"
 )
 
 const defaultSvcName = "kama-cache"
-
-// PeerPicker 定义了peer选择器的接口
-type PeerPicker interface {
-	PickPeer(key string) (peer Peer, ok bool, self bool)
-	Close() error
-}
-
-// Peer 定义了缓存节点的接口
-type Peer interface {
-	Get(group string, key string) ([]byte, error)
-	Set(ctx context.Context, group string, key string, value []byte) error
-	Delete(group string, key string) (bool, error)
-	Close() error
-}
 
 // ClientPicker 实现了PeerPicker接口
 type ClientPicker struct {
@@ -49,17 +36,6 @@ type PickerOption func(*ClientPicker)
 func WithServiceName(name string) PickerOption {
 	return func(p *ClientPicker) {
 		p.svcName = name
-	}
-}
-
-// PrintPeers 打印当前已发现的节点（仅用于调试）
-func (p *ClientPicker) PrintPeers() {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	log.Printf("当前已发现的节点:")
-	for addr := range p.clients {
-		log.Printf("- %s", addr)
 	}
 }
 
@@ -97,6 +73,17 @@ func NewClientPicker(addr string, opts ...PickerOption) (*ClientPicker, error) {
 	}
 
 	return picker, nil
+}
+
+// PrintPeers 打印当前已发现的节点（仅用于调试）
+func (p *ClientPicker) PrintPeers() {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	log.Printf("当前已发现的节点:")
+	for addr := range p.clients {
+		log.Printf("- %s", addr)
+	}
 }
 
 // startServiceDiscovery 启动服务发现
@@ -145,8 +132,8 @@ func (p *ClientPicker) handleWatchEvents(events []*clientv3.Event) {
 				logrus.Infof("New service discovered at %s", addr)
 			}
 		case clientv3.EventTypeDelete:
-			if client, exists := p.clients[addr]; exists {
-				client.Close()
+			if Peer, exists := p.clients[addr]; exists {
+				Peer.Close()
 				p.remove(addr)
 				logrus.Infof("Service removed at %s", addr)
 			}
@@ -180,7 +167,7 @@ func (p *ClientPicker) fetchAllServices() error {
 // set 添加服务实例
 func (p *ClientPicker) set(addr string) {
 	if client, err := NewClient(addr, p.svcName, p.etcdCli); err == nil {
-		p.consHash.Add(addr)
+		p.consHash.AddNode(addr)
 		p.clients[addr] = client
 		logrus.Infof("Successfully created client for %s", addr)
 	} else {
@@ -190,16 +177,16 @@ func (p *ClientPicker) set(addr string) {
 
 // remove 移除服务实例
 func (p *ClientPicker) remove(addr string) {
-	p.consHash.Remove(addr)
+	p.consHash.RemoveNode(addr)
 	delete(p.clients, addr)
 }
 
-// PickPeer 选择peer节点
+// * PickPeer implement PeerPicker interface, which was used by groups
 func (p *ClientPicker) PickPeer(key string) (Peer, bool, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if addr := p.consHash.Get(key); addr != "" {
+	if addr := p.consHash.GetNode(key); addr != "" {
 		if client, ok := p.clients[addr]; ok {
 			return client, true, addr == p.selfAddr
 		}

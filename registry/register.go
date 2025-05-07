@@ -10,20 +10,19 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// Config 定义etcd客户端配置
+// Config define etcd client config
 type Config struct {
-	Endpoints   []string      // 集群地址
-	DialTimeout time.Duration // 连接超时时间
+	Endpoints   []string      // etcd cluster address
+	DialTimeout time.Duration // connection timeout
 }
 
-// DefaultConfig 提供默认配置
 var DefaultConfig = &Config{
 	Endpoints:   []string{"localhost:2379"},
 	DialTimeout: 5 * time.Second,
 }
 
-// Register 注册服务到etcd
-func Register(svcName, addr string, stopCh <-chan error) error {
+// Register service to etcd
+func RegisterToEtcd(svcName, addr string, stopCh <-chan error) error {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   DefaultConfig.Endpoints,
 		DialTimeout: DefaultConfig.DialTimeout,
@@ -32,6 +31,7 @@ func Register(svcName, addr string, stopCh <-chan error) error {
 		return fmt.Errorf("failed to create etcd client: %v", err)
 	}
 
+	// Get locl IP, If addr not provides IP address.
 	localIP, err := getLocalIP()
 	if err != nil {
 		cli.Close()
@@ -41,14 +41,14 @@ func Register(svcName, addr string, stopCh <-chan error) error {
 		addr = fmt.Sprintf("%s%s", localIP, addr)
 	}
 
-	// 创建租约
+	// Create a lease.
 	lease, err := cli.Grant(context.Background(), 10) // 增加租约时间到10秒
 	if err != nil {
 		cli.Close()
 		return fmt.Errorf("failed to create lease: %v", err)
 	}
 
-	// 注册服务，使用完整的key路径
+	// Register server
 	key := fmt.Sprintf("/services/%s/%s", svcName, addr)
 	_, err = cli.Put(context.Background(), key, addr, clientv3.WithLease(lease.ID))
 	if err != nil {
@@ -56,25 +56,25 @@ func Register(svcName, addr string, stopCh <-chan error) error {
 		return fmt.Errorf("failed to put key-value to etcd: %v", err)
 	}
 
-	// 保持租约
+	// Create a keep-alive channel
 	keepAliveCh, err := cli.KeepAlive(context.Background(), lease.ID)
 	if err != nil {
 		cli.Close()
 		return fmt.Errorf("failed to keep lease alive: %v", err)
 	}
 
-	// 处理租约续期和服务注销
 	go func() {
 		defer cli.Close()
 		for {
 			select {
 			case <-stopCh:
-				// 服务注销，撤销租约
+				// Revoke lease and service.
 				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 				cli.Revoke(ctx, lease.ID)
 				cancel()
 				return
 			case resp, ok := <-keepAliveCh:
+				// Renew lease.
 				if !ok {
 					logrus.Warn("keep alive channel closed")
 					return

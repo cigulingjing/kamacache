@@ -102,7 +102,7 @@ func TestLFUCache(t *testing.T) {
 	})
 
 	t.Run("Test LFU eviction", func(t *testing.T) {
-		// 测试 LFU 替换策略
+		// One cache size is len(key)+len(value)=10
 		cache.SetMaxBytes(100)
 		for i := 0; i < 10; i++ {
 			key := fmt.Sprintf("key%d", i)
@@ -112,20 +112,16 @@ func TestLFUCache(t *testing.T) {
 			key := fmt.Sprintf("key%d", i)
 			cache.Get(key)
 		}
-		// 此时应该优先删除没有访问过的键（频率为 1）
+		// key5 is expected to evict
 		cache.Set("newKey", &lftvalue{"newValue", 6})
+
+		// Wait for eviction
+		time.Sleep(2 * time.Second)
+
+		// Check if key5 is evicted
 		_, ok := cache.Get("key5")
 		if ok {
 			t.Errorf("Expected key5 to be evicted, but it's still in the cache")
 		}
 	})
-}
-
-type value struct {
-	str string
-	len int
-}
-
-func (v *value) Len() int {
-	return v.len
 }

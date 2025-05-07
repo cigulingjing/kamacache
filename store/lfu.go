@@ -133,6 +133,10 @@ func (c *lfucache) Get(key string) (Value, bool) {
 
 // Set add or update cache item
 func (c *lfucache) Set(key string, value Value) error {
+	// Remaining cache insufficient
+	if c.usedBytes+int64(value.Len()) > c.maxBytes {
+		c.evict()
+	}
 	return c.SetWithExpiration(key, value, 0)
 }
 
