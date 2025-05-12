@@ -1,4 +1,4 @@
-package kamacache
+package main
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	// 添加命令行参数，用于区分不同节点
+	// Parse command line arguments
 	port := flag.Int("port", 8001, "节点端口")
 	nodeID := flag.String("node", "A", "节点标识符")
 	flag.Parse()
@@ -19,7 +19,7 @@ func main() {
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("[节点%s] 启动，地址: %s", *nodeID, addr)
 
-	// 创建节点
+	// Create rpc node
 	node, err := service.NewServer(addr, "kama-cache",
 		service.WithEtcdEndpoints([]string{"localhost:2379"}),
 		service.WithDialTimeout(5*time.Second),
@@ -28,13 +28,13 @@ func main() {
 		log.Fatal("创建节点失败:", err)
 	}
 
-	// 创建节点选择器
+	// Create Node Picker
 	picker, err := service.NewClientPicker(addr)
 	if err != nil {
 		log.Fatal("创建节点选择器失败:", err)
 	}
 
-	// 创建缓存组
+	// Create cache group
 	group := service.NewGroup("test", 2<<20, service.GetterFunc(
 		func(ctx context.Context, key string) ([]byte, error) {
 			log.Printf("[节点%s] 触发数据源加载: key=%s", *nodeID, key)

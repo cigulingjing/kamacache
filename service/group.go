@@ -42,6 +42,8 @@ func (f GetterFunc) Get(ctx context.Context, key string) ([]byte, error) {
 
 // * rpc.ClientPicker implements this interface
 type PeerPicker interface {
+	// If ok, found a peer.
+	// If self, means the peer is self.
 	PickPeer(key string) (peer Peer, ok bool, self bool)
 	Close() error
 }
@@ -148,7 +150,7 @@ func GetGroup(name string) *Group {
 
 // Get 从缓存获取数据
 func (g *Group) Get(ctx context.Context, key string) (ByteView, error) {
-	// 检查组是否已关闭
+	// Check if the group is closed
 	if atomic.LoadInt32(&g.closed) == 1 {
 		return ByteView{}, ErrGroupClosed
 	}
@@ -157,17 +159,15 @@ func (g *Group) Get(ctx context.Context, key string) (ByteView, error) {
 		return ByteView{}, ErrKeyRequired
 	}
 
-	// 从本地缓存获取
+	// Get from local cache
 	view, ok := g.mainCache.Get(ctx, key)
 	if ok {
 		atomic.AddInt64(&g.stats.localHits, 1)
 		return view, nil
+	} else {
+		atomic.AddInt64(&g.stats.localMisses, 1)
+		return g.load(ctx, key)
 	}
-
-	atomic.AddInt64(&g.stats.localMisses, 1)
-
-	// 尝试从其他节点获取或加载
-	return g.load(ctx, key)
 }
 
 // Set 设置缓存值
@@ -217,14 +217,15 @@ func (g *Group) Delete(ctx context.Context, key string) error {
 		return ErrKeyRequired
 	}
 
-	// 从本地缓存删除
-	g.mainCache.Delete(key)
+	// Attemp to delete from local cache. If key not exists, return false.
+	flag := g.mainCache.Delete(key)
 
-	// 检查是否是从其他节点同步过来的请求
+	// Check if Delete request from other peers.
 	isPeerRequest := ctx.Value("from_peer") != nil
 
-	// 如果不是从其他节点同步过来的请求，且启用了分布式模式，同步到其他节点
-	if !isPeerRequest && g.peers != nil {
+	// If not from other peers, meaning this is a local delete request.
+	// What's more, if peers is not nil, sync to other peers.
+	if !flag && !isPeerRequest && g.peers != nil {
 		go g.syncToPeers(ctx, "delete", key, nil)
 	}
 
@@ -237,7 +238,7 @@ func (g *Group) syncToPeers(ctx context.Context, op string, key string, value []
 		return
 	}
 
-	// 选择对等节点
+	// Choose which distributed node to sync. If node is self or not found peers, return.
 	peer, ok, isSelf := g.peers.PickPeer(key)
 	if !ok || isSelf {
 		return
@@ -291,7 +292,7 @@ func (g *Group) Close() error {
 	return nil
 }
 
-// load 加载数据
+// load data from data source
 func (g *Group) load(ctx context.Context, key string) (value ByteView, err error) {
 	// 使用 singleflight 确保并发请求只加载一次
 	startTime := time.Now()

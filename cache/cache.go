@@ -11,8 +11,6 @@ import (
 	"github.com/cigulingjing/kamacache/store"
 )
 
-
-
 // Cache 是对底层缓存存储的封装
 type Cache struct {
 	mu          sync.RWMutex
@@ -38,7 +36,7 @@ type CacheOptions struct {
 // DefaultCacheOptions 返回默认的缓存配置
 func DefaultCacheOptions() CacheOptions {
 	return CacheOptions{
-		CacheType:    store.LRU2,
+		CacheType:    store.LFU,
 		MaxBytes:     8 * 1024 * 1024, // 8MB
 		BucketCount:  16,
 		CapPerBucket: 512,

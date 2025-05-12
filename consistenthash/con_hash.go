@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-// Map implements a consistent hashing algorithm
-type Map struct {
+// ConsHash implements a consistent hashing algorithm
+type ConsHash struct {
 	mu            sync.RWMutex
 	config        *Config
 	hashRing      []int
@@ -21,8 +21,8 @@ type Map struct {
 	totalRequests int64
 }
 
-func New(opts ...Option) *Map {
-	m := &Map{
+func New(opts ...Option) *ConsHash {
+	m := &ConsHash{
 		config:        DefaultConfig,
 		hashToNodeMap: make(map[int]string),
 		vritualNum:    make(map[string]int),
@@ -37,16 +37,16 @@ func New(opts ...Option) *Map {
 	return m
 }
 
-type Option func(*Map)
+type Option func(*ConsHash)
 
 func WithConfig(config *Config) Option {
-	return func(m *Map) {
+	return func(m *ConsHash) {
 		m.config = config
 	}
 }
 
 // AddNode nodes to the hash ring
-func (m *Map) AddNode(nodes ...string) error {
+func (m *ConsHash) AddNode(nodes ...string) error {
 	if len(nodes) == 0 {
 		return errors.New("no nodes provided")
 	}
@@ -64,7 +64,7 @@ func (m *Map) AddNode(nodes ...string) error {
 }
 
 // RemoveNode node from the hash ring
-func (m *Map) RemoveNode(node string) error {
+func (m *ConsHash) RemoveNode(node string) error {
 	if node == "" {
 		return errors.New("invalid node")
 	}
@@ -86,7 +86,7 @@ func (m *Map) RemoveNode(node string) error {
 
 // Remove node and its virtual nodes
 // ! Call this method must hold write lock
-func (m *Map) removeWithVirtualNode(node string, replicas int) {
+func (m *ConsHash) removeWithVirtualNode(node string, replicas int) {
 	for i := 0; i < replicas; i++ {
 		hash := int(m.config.HashFunc([]byte(fmt.Sprintf("%s-%d", node, i))))
 		delete(m.hashToNodeMap, hash)
@@ -102,7 +102,7 @@ func (m *Map) removeWithVirtualNode(node string, replicas int) {
 }
 
 // GetNode get the node which store the key
-func (m *Map) GetNode(key string) string {
+func (m *ConsHash) GetNode(key string) string {
 	if key == "" {
 		return ""
 	}
@@ -135,7 +135,7 @@ func (m *Map) GetNode(key string) string {
 
 // addVritualNode virtual nodes.
 // ! Call this method must hold write lock
-func (m *Map) addVritualNode(node string, replicas int) {
+func (m *ConsHash) addVritualNode(node string, replicas int) {
 
 	for i := 0; i < replicas; i++ {
 		hash := int(m.config.HashFunc([]byte(fmt.Sprintf("%s-%d", node, i))))
@@ -149,7 +149,7 @@ func (m *Map) addVritualNode(node string, replicas int) {
 }
 
 // checkAndRebalance check and rebalance load
-func (m *Map) checkAndRebalance() {
+func (m *ConsHash) checkAndRebalance() {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,7 +176,7 @@ func (m *Map) checkAndRebalance() {
 }
 
 // rebalanceNodes
-func (m *Map) rebalanceNodes() {
+func (m *ConsHash) rebalanceNodes() {
 
 	avgLoad := float64(m.totalRequests) / float64(len(m.vritualNum))
 	// Adjusting the number of virtual nodes
@@ -216,7 +216,7 @@ func (m *Map) rebalanceNodes() {
 }
 
 // GetStats get each node's request/total request ratio
-func (m *Map) GetStats() map[string]float64 {
+func (m *ConsHash) GetStats() map[string]float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -233,7 +233,7 @@ func (m *Map) GetStats() map[string]float64 {
 }
 
 // startBalancer starts routine to run @checkAndRebalance
-func (m *Map) startBalancer() {
+func (m *ConsHash) startBalancer() {
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
