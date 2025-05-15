@@ -1,4 +1,4 @@
-module github.com/cigulingjing/kamacache
+module github.com/cigulingjing/discache
 
 go 1.22
 

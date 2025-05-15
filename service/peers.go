@@ -11,8 +11,8 @@ import (
 	"github.com/sirupsen/logrus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/cigulingjing/kamacache/consistenthash"
-	"github.com/cigulingjing/kamacache/registry"
+	"github.com/cigulingjing/discache/consistenthash"
+	"github.com/cigulingjing/discache/registry"
 )
 
 const defaultSvcName = "kama-cache"

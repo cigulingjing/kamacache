@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	. "github.com/cigulingjing/kamacache/cache"
-	"github.com/cigulingjing/kamacache/singleflight"
+	. "github.com/cigulingjing/discache/cache"
+	"github.com/cigulingjing/discache/singleflight"
 	"github.com/sirupsen/logrus"
 )
 
@@ -256,7 +256,7 @@ func (g *Group) syncToPeers(ctx context.Context, op string, key string, value []
 	}
 
 	if err != nil {
-		logrus.Errorf("[KamaCache] failed to sync %s to peer: %v", op, err)
+		logrus.Errorf("[discache] failed to sync %s to peer: %v", op, err)
 	}
 }
 
@@ -268,7 +268,7 @@ func (g *Group) Clear() {
 	}
 
 	g.mainCache.Clear()
-	logrus.Infof("[KamaCache] cleared cache for group [%s]", g.name)
+	logrus.Infof("[discache] cleared cache for group [%s]", g.name)
 }
 
 // Close 关闭组并释放资源
@@ -288,7 +288,7 @@ func (g *Group) Close() error {
 	delete(groups, g.name)
 	groupsMu.Unlock()
 
-	logrus.Infof("[KamaCache] closed cache group [%s]", g.name)
+	logrus.Infof("[discache] closed cache group [%s]", g.name)
 	return nil
 }
 
@@ -335,7 +335,7 @@ func (g *Group) loadData(ctx context.Context, key string) (value ByteView, err e
 			}
 
 			atomic.AddInt64(&g.stats.peerMisses, 1)
-			logrus.Warnf("[KamaCache] failed to get from peer: %v", err)
+			logrus.Warnf("[discache] failed to get from peer: %v", err)
 		}
 	}
 
@@ -364,7 +364,7 @@ func (g *Group) RegisterPeers(peers PeerPicker) {
 		panic("RegisterPeers called more than once")
 	}
 	g.peers = peers
-	logrus.Infof("[KamaCache] registered peers for group [%s]", g.name)
+	logrus.Infof("registered peers for group [%s]", g.name)
 }
 
 // Stats 返回缓存统计信息
@@ -425,7 +425,7 @@ func DestroyGroup(name string) bool {
 	if g, exists := groups[name]; exists {
 		g.Close()
 		delete(groups, name)
-		logrus.Infof("[KamaCache] destroyed cache group [%s]", name)
+		logrus.Infof("[discache] destroyed cache group [%s]", name)
 		return true
 	}
 
@@ -440,6 +440,6 @@ func DestroyAllGroups() {
 	for name, g := range groups {
 		g.Close()
 		delete(groups, name)
-		logrus.Infof("[KamaCache] destroyed cache group [%s]", name)
+		logrus.Infof("[discache] destroyed cache group [%s]", name)
 	}
 }

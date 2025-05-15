@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	pb "github.com/cigulingjing/kamacache/service/pb"
+	pb "github.com/cigulingjing/discache/service/pb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -18,7 +18,7 @@ type Client struct {
 	svcName string
 	etcdCli *clientv3.Client
 	conn    *grpc.ClientConn
-	grpcCli pb.KamaCacheClient
+	grpcCli pb.CacheClient
 }
 
 // var _ Peer = (*Client)(nil)
@@ -45,7 +45,7 @@ func NewClient(addr string, svcName string, etcdCli *clientv3.Client) (*Client, 
 		return nil, fmt.Errorf("failed to dial server: %v", err)
 	}
 
-	grpcClient := pb.NewKamaCacheClient(conn)
+	grpcClient := pb.NewCacheClient(conn)
 
 	client := &Client{
 		addr:    addr,
@@ -67,7 +67,7 @@ func (c *Client) Get(group, key string) ([]byte, error) {
 		Key:   key,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get value from kamacache: %v", err)
+		return nil, fmt.Errorf("failed to get value from discache: %v", err)
 	}
 
 	return resp.GetValue(), nil
@@ -82,7 +82,7 @@ func (c *Client) Delete(group, key string) (bool, error) {
 		Key:   key,
 	})
 	if err != nil {
-		return false, fmt.Errorf("failed to delete value from kamacache: %v", err)
+		return false, fmt.Errorf("failed to delete value from discache: %v", err)
 	}
 
 	return resp.GetValue(), nil
@@ -95,7 +95,7 @@ func (c *Client) Set(ctx context.Context, group, key string, value []byte) error
 		Value: value,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to set value to kamacache: %v", err)
+		return fmt.Errorf("failed to set value to discache: %v", err)
 	}
 	logrus.Infof("grpc set request resp: %+v", resp)
 

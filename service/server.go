@@ -15,14 +15,14 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"github.com/cigulingjing/kamacache/registry"
+	"github.com/cigulingjing/discache/registry"
 
-	pb "github.com/cigulingjing/kamacache/service/pb"
+	pb "github.com/cigulingjing/discache/service/pb"
 )
 
 // Cache server
 type Server struct {
-	pb.UnimplementedKamaCacheServer
+	pb.UnimplementedCacheServer
 	addr       string
 	svcName    string           // service name
 	groups     *sync.Map        // Cache groups
@@ -114,7 +114,7 @@ func NewServer(addr, svcName string, opts ...ServerOption) (*Server, error) {
 	}
 
 	// Register gRPC service.
-	pb.RegisterKamaCacheServer(srv.grpcServer, srv)
+	pb.RegisterCacheServer(srv.grpcServer, srv)
 
 	// Register health check service.
 	healthServer := health.NewServer()
@@ -153,7 +153,7 @@ func (s *Server) Stop() {
 	}
 }
 
-// * Server implementation of pb.KamaCacheServer interface
+// * Server implementation of pb.CacherServer interface
 func (s *Server) Get(ctx context.Context, req *pb.Request) (*pb.ResponseForGet, error) {
 	group := GetGroup(req.Group)
 	if group == nil {

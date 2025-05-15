@@ -8,7 +8,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/cigulingjing/kamacache/store"
+	"github.com/cigulingjing/discache/store"
 )
 
 // Cache 是对底层缓存存储的封装

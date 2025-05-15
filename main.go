@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/cigulingjing/kamacache/service"
+	"github.com/cigulingjing/discache/service"
 )
 
 func main() {
